@@ -1,0 +1,116 @@
+name: deploy
+
+# Build the image and put it on the production host.
+#
+# Two guards, and neither is decoration. `if: github.ref == …/main` is written
+# out even though `on.push.branches` already says main, because a
+# `workflow_dispatch` from a branch would otherwise deploy that branch. And the
+# ssh key this uses is NOT the one that deploys the TeamToken backend: it is
+# restricted by `command=` to a wrapper that accepts `deploy-mcp <ref>` and
+# `status`, so whoever gains write access here still cannot deploy anything but
+# this server, cannot roll production back, and gets no shell.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: build & push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      image: ${{ steps.ref.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: ref
+        # The registry requires a lowercase name and github.repository does not
+        # guarantee one. The tag is the commit sha: an immutable tag is what lets
+        # the host refuse anything that is not a specific build.
+        run: |
+          repo=$(echo "${{ github.repository }}" | tr 'A-Z' 'a-z')
+          echo "image=ghcr.io/$repo:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.ref.outputs.image }}
+          cache-from: type=gha,scope=mcp
+          cache-to: type=gha,mode=max,scope=mcp
+
+  deploy:
+    name: deploy to production
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: ssh deploy-mcp
+        env:
+          KEY: ${{ secrets.PROD_DEPLOY_SSH_KEY }}
+          # Both are SECRETS, not variables, and the difference is the whole
+          # point. Variables are not redacted in run logs: this step printed
+          # `HOST: <origin ip>` in plain text on every deploy, which is fine
+          # while the repository is private and is a published origin address
+          # the moment it is not. Our domains sit behind a WAF, and the origin
+          # IP is exactly what lets someone walk around it. As a secret the same
+          # value comes out as `***`.
+          #
+          # The host key itself is public information — every ssh client stores
+          # it and ssh-keyscan hands it to anyone — but it CONTAINS the address,
+          # so it has to be a secret for the same reason.
+          #
+          # ⚠️ Redaction is best-effort: GitHub says it "is not guaranteed" for a
+          # transformed value. Never echo these through base64, split them, or
+          # print them a piece at a time.
+          #
+          # Set both in Settings → Secrets; without them this step stops with a
+          # readable message instead of trusting whatever answers.
+          HOST: ${{ secrets.PROD_HOST }}
+          HOST_KEY: ${{ secrets.PROD_HOST_KEY }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY" ]; then
+            echo "::error::PROD_DEPLOY_SSH_KEY is not set — add it in Settings → Secrets"
+            exit 1
+          fi
+          if [ -z "$HOST" ] || [ -z "$HOST_KEY" ]; then
+            echo "::error::PROD_HOST and PROD_HOST_KEY are not set — add them in Settings → Secrets, as secrets and never as variables"
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$KEY" > key
+          # The host key is pinned, not trusted on first use. A runner is fresh
+          # every time, so `accept-new` would accept whatever answers — and this
+          # step hands that server a GITHUB_TOKEN with packages:write. Public
+          # keys are public information, so pinning it here costs nothing.
+          printf '%s\n' "$HOST_KEY" > known_hosts
+          trap 'rm -f key known_hosts' EXIT
+          # The registry token goes in on stdin, never in argv: the process list
+          # is readable on a shared host.
+          printf '%s' "$TOKEN" | ssh -i key -o UserKnownHostsFile=known_hosts \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            "root@${HOST}" "deploy-mcp $IMAGE"

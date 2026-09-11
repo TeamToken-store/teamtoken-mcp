@@ -1,0 +1,10 @@
+# Test image: sources arrive through a mount, so a code edit costs no rebuild.
+#
+#   docker build -f Dockerfile.dev -t teamtoken-mcp-dev .
+#   docker run --rm -v "$PWD":/work -w /work teamtoken-mcp-dev pytest -q
+FROM python:3.12-slim
+WORKDIR /work
+COPY pyproject.toml ./
+RUN mkdir -p teamtoken_mcp && touch teamtoken_mcp/__init__.py \
+    && pip install --no-cache-dir -e ".[dev]"
+CMD ["pytest", "-q"]

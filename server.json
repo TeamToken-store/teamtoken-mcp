@@ -1,0 +1,26 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "store.teamtoken/media",
+  "description": "Image and video generation across 50+ models (Nano Banana, GPT Image, Grok, Veo, Kling, Seedance) through one API key.",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/TeamToken-store/teamtoken-mcp",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "websiteUrl": "https://app.teamtoken.store",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://teamtoken.store/mcp",
+      "headers": [
+        {
+          "name": "x-api-key",
+          "description": "TeamToken API key from https://app.teamtoken.store",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

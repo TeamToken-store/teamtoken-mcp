@@ -1,0 +1,10 @@
+# Everything in this repository is text and must keep LF endings. A fresh clone
+# on Windows with `core.autocrlf=true` would otherwise hand CRLF to files that
+# go into the image and are read by a shell: bash then fails with
+# `$'\r': command not found`, and a value read from a file is silently spoiled
+# by the trailing carriage return rather than rejected.
+* text=auto eol=lf
+
+# Icons are binary and must never be touched by end-of-line conversion.
+*.png binary
+*.ico binary

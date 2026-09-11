@@ -1,0 +1,40 @@
+[project]
+name = "teamtoken-mcp"
+version = "1.0.0"
+description = "MCP server for the TeamToken media API — image and video generation over streamable-http"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+# The upper bound on each is not belt-and-braces. Without it the same commit
+# builds one image today and a different one next month: a major release reaches
+# production with no review, and the first to notice is a user. FastMCP carries
+# the transport and `custom_route`, httpx carries every call to the gateway, so
+# a major is exactly what breaks silently.
+#
+# httpx has had no major yet and ships breaking changes in minors, hence a minor
+# bound for it rather than a major one.
+dependencies = [
+  # FastMCP owns the protocol: streamable-http transport, tool schemas from
+  # type hints, and the ASGI app the deployment mounts. Pinned to >=4 because
+  # `http_app(transport="http")` and `custom_route` are 4.x API.
+  "fastmcp>=4.0.3,<5",
+  "httpx>=0.27,<0.29",
+  "uvicorn[standard]>=0.32,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "respx>=0.21",
+]
+
+[tool.setuptools.packages.find]
+include = ["teamtoken_mcp*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
